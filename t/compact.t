@@ -5,10 +5,16 @@ use Test::More;
 use Test::BinaryData;
 use Thrift::XS;
 
-plan tests => 61;
+plan tests => 60;
 
 my $xst = Thrift::XS::MemoryBuffer->new;
 my $xsp = Thrift::XS::CompactProtocol->new($xst);
+
+# Test that getTransport works
+{
+    my $t = $xsp->getTransport();
+    isa_ok($t, 'Thrift::XS::MemoryBuffer', "getTransport ok");
+}
 
 my $test = sub {
     my ($method, $args, $expect) = @_;
@@ -43,14 +49,9 @@ my $test = sub {
     $test->('writeFieldEnd' => [] => '');
     
     $test->('writeFieldStop' => [] => pack('H*', 0));
-    
-    # Check last_fields/last_field_id after writeStruct methods
+
     $test->('writeStructBegin' => [ 'foo' ] => '');
-    is( $xsp->{last_field_id}, 0, "writeStructBegin last_field_id ok" );
-    is( $xsp->{last_fields}->[0], 3, "writeStructBegin last_fields stack ok" );
     $test->('writeStructEnd' => [] => '');
-    is( $xsp->{last_field_id}, 3, "writeStructEnd last_field_id ok" );
-    is( scalar @{ $xsp->{last_fields} }, 0, "writeStructEnd last_fields stack ok" );
     
     $test->('writeMapBegin' => [ TType::STRING, TType::LIST, 42 ] => pack('H*', '2a89'));
     $test->('writeMapBegin' => [ TType::STRING, TType::LIST, 0 ] => pack('H*', 0));
@@ -68,8 +69,11 @@ my $test = sub {
     $test->('writeI32' => [ 1 << 30 ] => pack('H*', '8080808008'));
     $test->('writeI32' => [ -60124235 ] => pack('H*', '95b1ab39'));
     
-    $test->('writeI64' => [ 1 << 40 ] => pack('H*', '808080808040'));
-    $test->('writeI64' => [ -235412341332 ] => pack('H*', 'a789dafad90d'));
+    # writeI64 supports both strings and numbers. >32-bit values are strings so they work on 32-bit systems
+    $test->('writeI64' => [ 1234567 ] => pack('H*', '8eda9601'));
+    $test->('writeI64' => [ "1099511627776" ] => pack('H*', '808080808040'));
+    $test->('writeI64' => [ "-235412341332" ] => pack('H*', 'a789dafad90d'));
+    $test->('writeI64' => [ "-169599668584448" ] => pack('H*', 'ffffffffff8f4d'));
     
     $test->('writeDouble' => [ 3.14159 ] => pack('H*', '6e861bf0f9210940'));
     
@@ -79,19 +83,7 @@ my $test = sub {
 }
 
 # Read tests
-
-# Reset state before every test
-my $reset_state = sub {
-    delete $xsp->{bool_type};
-    delete $xsp->{bool_id};
-    delete $xsp->{bool_value_id};
-    $xsp->{last_field_id} = 0;
-    $xsp->{last_fields} = [];
-};
-
 {
-    $reset_state->();
-    
     my ($name, $type, $seqid);
     $xsp->writeMessageBegin('login русский', TMessageType::CALL, 12345);
     $xsp->readMessageBegin(\$name, \$type, \$seqid);
@@ -101,17 +93,13 @@ my $reset_state = sub {
 }
 
 {
-    $reset_state->();
-    
     my $name;
     $xsp->writeStructBegin('foo');
     $xsp->readStructBegin(\$name);
     is($name, '', "readStructBegin name ok");
 }
 
-{
-    $reset_state->();
-    
+{ 
     my ($name, $type, $id);   
     $xsp->writeFieldBegin('start', TType::STRING, 2600);
     $xsp->readFieldBegin(\$name, \$type, \$id);
@@ -120,9 +108,7 @@ my $reset_state = sub {
     is($id, 2600, "readFieldBegin fieldid ok");
 }
 
-{
-    $reset_state->();
-    
+{ 
     my ($keytype, $valtype, $size);
     $xsp->writeMapBegin(TType::STRING, TType::LIST, 42);
     $xsp->readMapBegin(\$keytype, \$valtype, \$size);
@@ -131,9 +117,7 @@ my $reset_state = sub {
     is($size, 42, "readMapBegin size ok");
 }
 
-{
-    $reset_state->();
-    
+{   
     my ($elemtype, $size);
     $xsp->writeListBegin(TType::STRUCT, 12345);
     $xsp->readListBegin(\$elemtype, \$size);
@@ -141,9 +125,7 @@ my $reset_state = sub {
     is($size, 12345, "readListBegin size ok");
 }
 
-{
-    $reset_state->();
-    
+{   
     my ($elemtype, $size);
     $xsp->writeSetBegin(TType::I16, 12345);
     $xsp->readSetBegin(\$elemtype, \$size);
@@ -185,9 +167,10 @@ my $reset_state = sub {
 
 {
     my $value;
-    $xsp->writeI64((1 << 37) * -1234);
+    my $i64 = "-169599668584448";
+    $xsp->writeI64($i64);
     $xsp->readI64(\$value);
-    is($value, (1 << 37) * -1234, "readI64 ok");
+    is($value, $i64, "readI64 ok");
 }
 
 {
@@ -206,7 +189,7 @@ my $reset_state = sub {
 
 # Test a real struct/field group from Cassandra
 {
-    $reset_state->();
+    $xsp->resetState();
     
     $xsp->writeStructBegin('SliceRange');
     $xsp->writeFieldBegin('start', TType::STRING, 1);
@@ -275,14 +258,12 @@ my $reset_state = sub {
 
 # Struct/Map/String code from Cassandra
 {
-    # Reset state
-    $xsp->{last_field_id} = 0;
-    $xsp->{last_fields} = [];
-    
     my $credentials = {
         user1 => 'pass1',
         user2 => 'pass2',
     };
+    
+    $xsp->resetState();
     
     $xsp->writeStructBegin('AuthenticationRequest');
     $xsp->writeFieldBegin('credentials', TType::MAP, 1);
@@ -341,15 +322,13 @@ my $reset_state = sub {
 }
 
 # map<string, list<string>> describe_schema_versions()
-{
-    # Reset state
-    $xsp->{last_field_id} = 0;
-    $xsp->{last_fields} = [];
-    
+{    
     my $data = {
         foo => [ 1, 2, 3 ],
         bar => [ 4, 5, 6 ],
     };
+    
+    $xsp->resetState();
     
     $xsp->writeStructBegin('Cassandra_describe_schema_versions_result');
     $xsp->writeFieldBegin('success', TType::MAP, 0);

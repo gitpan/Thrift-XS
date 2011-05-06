@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               Thrift-XS
-version:            1.01
+version:            1.02
 abstract:           Faster Thrift binary protocol encoding and decoding
 author:
     - Andy Grundman <andy@slimdevices.com>
@@ -11,10 +11,9 @@ configure_requires:
 build_requires:
     ExtUtils::MakeMaker:  0
 requires:
-    Bit::Vector:        0
-    Class::Accessor:    0
-    Test::BinaryData:   0
-    XS::Object::Magic:  0
+    Bit::Vector:       0
+    Class::Accessor:   0
+    Test::BinaryData:  0
 resources:
     license:     http://www.apache.org/licenses/LICENSE-2.0
     repository:  https://github.com/andygrundman/thrift-xs
