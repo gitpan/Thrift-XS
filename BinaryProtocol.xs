@@ -349,22 +349,17 @@ CODE:
   DEBUG_TRACE("writeDouble(%f)\n", (double)SvNV(value));
   char data[8];
   union {
-    double d;
-    int64_t i;
+    double from;
+    uint64_t to;
   } u;
   RETVAL = 0;
   
-  u.d = (double)SvNV(value);
-
-  data[7] = u.i & 0xff;
-  data[6] = (u.i >> 8) & 0xff;
-  data[5] = (u.i >> 16) & 0xff;
-  data[4] = (u.i >> 24) & 0xff;
-  data[3] = (u.i >> 32) & 0xff;
-  data[2] = (u.i >> 40) & 0xff;
-  data[1] = (u.i >> 48) & 0xff;
-  data[0] = (u.i >> 56) & 0xff;
+  u.from = (double)SvNV(value);
+  uint64_t bits = u.to;
+  bits = htonll(bits);
   
+  memcpy(&data, (uint8_t *)&bits, 8);
+
   WRITE(p, data, 8);
   RETVAL += 8;
 }
@@ -757,25 +752,24 @@ CODE:
   DEBUG_TRACE("readDouble()\n");
   SV *tmp;
   char *tmps;
+  uint64_t bits;
   RETVAL = 0;
   
   READ_SV(p, tmp, 8);
   tmps = SvPVX(tmp);
   RETVAL += 8;
   
-  uint64_t hi;
-  uint32_t lo;
-  I32_TO_INT(hi, tmps, 0);
-  I32_TO_INT(lo, tmps, 4);
+  bits = *(uint64_t *)tmps;
+  bits = ntohll(bits);
 
   union {
-    double d;
-    int64_t i;
-  } u;  
-  u.i = (hi << 32) | lo;
+    uint64_t from;
+    double to;
+  } u;
+  u.from = bits;
   
   if (SvROK(value))
-    sv_setnv(SvRV(value), u.d);
+    sv_setnv(SvRV(value), u.to);
 }
 OUTPUT:
   RETVAL
